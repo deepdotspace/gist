@@ -17,5 +17,11 @@ export const TRANSCRIPT_ACTOR_ID = 'pintostudio/youtube-transcript-scraper'
 /** Hard cap on Apify spend per run (USD). PAY_PER_EVENT actors require this. */
 export const TRANSCRIPT_MAX_COST_USD = 2
 
-/** Claude model used for summarizing/structuring + quiz generation. */
-export const SUMMARY_MODEL = 'claude-sonnet-4-20250514'
+/**
+ * Claude model used for summarizing/structuring + quiz generation.
+ * NOTE: the anthropic integration's own schema default
+ * (`claude-sonnet-4-20250514`) is dead on the platform (404 model not found),
+ * so the model id must be passed explicitly. `claude-sonnet-4-6` is verified
+ * working through the proxy.
+ */
+export const SUMMARY_MODEL = 'claude-sonnet-4-6'
