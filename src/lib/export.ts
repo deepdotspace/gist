@@ -17,6 +17,11 @@ export function buildMarkdownNotes(meta: VideoMeta, gist: GistContent): string {
     lines.push('## TL;DR', gist.tldr, '')
   }
 
+  if (gist.deepDive.length) {
+    lines.push('## The long read')
+    for (const para of gist.deepDive) lines.push(para, '')
+  }
+
   if (gist.chapters.length) {
     lines.push('## Chapters')
     for (const c of gist.chapters) {

@@ -28,7 +28,7 @@ export function Quiz({ questions, generating, genError, onGenerate }: QuizProps)
           <Sparkles className="h-6 w-6" />
         </div>
         <div>
-          <h3 className="text-base font-semibold">Test yourself</h3>
+          <h3 className="reading-serif text-xl font-semibold">Test yourself</h3>
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
             Generate a quick 5-question quiz from this video to check what stuck.
           </p>
@@ -85,7 +85,7 @@ function QuizRunner({ questions }: { questions: QuizQuestion[] }) {
     return (
       <div className="rounded-xl border border-border bg-card p-8 text-center">
         <p className="text-sm font-medium text-muted-foreground">You scored</p>
-        <p className="mt-1 text-5xl font-bold tracking-tight text-foreground">
+        <p className="reading-serif mt-1 text-6xl font-bold tracking-tight text-foreground">
           {score}
           <span className="text-2xl text-muted-foreground">/{questions.length}</span>
         </p>
@@ -114,7 +114,7 @@ function QuizRunner({ questions }: { questions: QuizQuestion[] }) {
         </div>
       </div>
 
-      <h3 className="text-lg font-semibold leading-snug text-foreground">{q.question}</h3>
+      <h3 className="reading-serif text-xl font-semibold leading-snug text-foreground">{q.question}</h3>
 
       <div className="mt-4 space-y-2">
         {q.options.map((opt, i) => {

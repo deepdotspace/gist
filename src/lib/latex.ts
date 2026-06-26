@@ -50,6 +50,11 @@ export function buildLatexDocument(meta: VideoMeta, gist: GistContent): string {
     sections.push(`\\section*{TL;DR}\n${tex(gist.tldr)}`)
   }
 
+  if (gist.deepDive.length > 0) {
+    const paras = gist.deepDive.map((p) => tex(p)).join('\n\n')
+    sections.push(`\\section*{The long read}\n${paras}`)
+  }
+
   if (gist.chapters.length > 0) {
     const rows = gist.chapters
       .map(

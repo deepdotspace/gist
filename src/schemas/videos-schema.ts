@@ -19,6 +19,7 @@ export const videosSchema: CollectionSchema = {
     { name: 'thumbnail', storage: 'text', interpretation: 'plain' },
     { name: 'duration', storage: 'text', interpretation: 'plain' },
     { name: 'tldr', storage: 'text', interpretation: 'plain' },
+    { name: 'deepDive', storage: 'text', interpretation: { kind: 'json' } },
     { name: 'chapters', storage: 'text', interpretation: { kind: 'json' } },
     { name: 'keyQuotes', storage: 'text', interpretation: { kind: 'json' } },
     { name: 'steps', storage: 'text', interpretation: { kind: 'json' } },

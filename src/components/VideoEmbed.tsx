@@ -6,9 +6,9 @@ export interface VideoEmbedHandle {
 }
 
 /**
- * Embedded YouTube player. Seeking is done by reloading the iframe with a
- * `start=` param + autoplay — reliable and dependency-free (no IFrame JS API
- * wiring / origin handshake to get wrong).
+ * Embedded YouTube player that fills its parent (the parent controls size /
+ * docking). Seeking reloads the iframe with a `start=` param + autoplay —
+ * reliable and dependency-free (no IFrame JS API / origin handshake).
  */
 export const VideoEmbed = forwardRef<VideoEmbedHandle, { videoId: string; title?: string }>(
   function VideoEmbed({ videoId, title }, ref) {
@@ -30,17 +30,15 @@ export const VideoEmbed = forwardRef<VideoEmbedHandle, { videoId: string; title?
     const src = `https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`
 
     return (
-      <div className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-black shadow-card">
-        <iframe
-          key={nonce}
-          src={src}
-          title={title ?? 'YouTube video player'}
-          className="h-full w-full"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-          allowFullScreen
-          referrerPolicy="strict-origin-when-cross-origin"
-        />
-      </div>
+      <iframe
+        key={nonce}
+        src={src}
+        title={title ?? 'YouTube video player'}
+        className="h-full w-full"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+        referrerPolicy="strict-origin-when-cross-origin"
+      />
     )
   },
 )

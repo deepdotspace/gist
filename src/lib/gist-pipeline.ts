@@ -37,6 +37,8 @@ export interface Chapter {
 
 export interface GistContent {
   tldr: string
+  /** "The long read" — a multi-paragraph narrative summary. */
+  deepDive: string[]
   chapters: Chapter[]
   keyQuotes: string[]
   steps: string[]
@@ -244,6 +246,7 @@ You will receive a transcript where each line is prefixed with its timestamp lik
 Return ONLY a JSON object (no markdown fences, no prose) with exactly this shape:
 {
   "tldr": string,              // 2-4 sentence summary of the whole video
+  "deepDive": string[],        // 3-6 paragraphs: a thorough, well-written prose version of the video
   "chapters": [                // 3-8 logical sections in order
     { "title": string, "startTimestamp": string, "summary": string }
   ],
@@ -252,6 +255,7 @@ Return ONLY a JSON object (no markdown fences, no prose) with exactly this shape
 }
 
 Rules:
+- "tldr" is the quick gist. "deepDive" is the satisfying long read: 3-6 flowing paragraphs (each a separate array item) that walk through the video's actual content, argument, examples, and conclusions in order — enough that the reader genuinely doesn't need to watch it. Write it as clean editorial prose, not bullet points, and don't just restate the tldr.
 - "startTimestamp" must be copied from the transcript timestamps (format "m:ss" or "h:mm:ss") and mark where that chapter begins.
 - Each chapter "summary" is 1-3 sentences capturing what's covered.
 - Only populate "steps" when the video is genuinely instructional. Otherwise return [].
@@ -281,6 +285,7 @@ ${transcriptText}`
 
   return {
     tldr: String(parsed.tldr ?? '').trim(),
+    deepDive: toStringArray(parsed.deepDive),
     chapters: chapters.map(normalizeChapter).filter((c) => c.title || c.summary),
     keyQuotes: toStringArray(parsed.keyQuotes),
     steps: toStringArray(parsed.steps),
