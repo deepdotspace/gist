@@ -86,25 +86,27 @@ export async function fetchMetadata(videoId: string): Promise<VideoMeta> {
     duration: '',
   }
 
-  // Primary: the first-party integration (spec'd path).
+  // Primary: the first-party integration (spec'd path). The handler returns
+  // `{ videos: [item] }`, where item carries the YouTube Data API shape plus
+  // a `links`/`formatted` convenience layer added by the api-worker.
   try {
     const data = asRecord(await callIntegration('youtube/get-video-details', { id: videoId }))
-    const snippet = asRecord(data.snippet)
-    const details = asRecord(data.contentDetails)
+    const videos = Array.isArray(data.videos) ? data.videos : []
+    const item = asRecord(videos[0])
+    const snippet = asRecord(item.snippet)
+    const details = asRecord(item.contentDetails)
+    const links = asRecord(item.links)
     const thumbs = asRecord(snippet.thumbnails)
-    const high = asRecord(thumbs.maxres ?? thumbs.high ?? thumbs.medium)
+    const best = asRecord(thumbs.maxres ?? thumbs.high ?? thumbs.medium ?? thumbs.default)
 
-    const title = String(data.title ?? snippet.title ?? '')
-    const channel = String(
-      data.channelTitle ?? snippet.channelTitle ?? data.author ?? '',
-    )
+    const title = String(snippet.title ?? '')
     if (title) {
       return {
         ...base,
         title,
-        channel,
-        thumbnail: String(high.url ?? base.thumbnail),
-        duration: formatDuration(details.duration ?? data.duration ?? data.lengthSeconds),
+        channel: String(snippet.channelTitle ?? ''),
+        thumbnail: String(best.url ?? links.thumbnail ?? base.thumbnail),
+        duration: formatDuration(details.duration ?? ''),
       }
     }
   } catch {
