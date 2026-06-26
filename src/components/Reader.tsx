@@ -11,18 +11,22 @@ import {
   X,
   Highlighter,
   Trash2,
+  Tag as TagIcon,
+  Plus,
+  X as XIcon,
 } from 'lucide-react'
 import { useToast } from './ui'
 import { cn } from './ui/utils'
 import { VideoEmbed, type VideoEmbedHandle } from './VideoEmbed'
 import { Quiz } from './Quiz'
+import { AskVideo } from './AskVideo'
 import type { VideoRecord, Highlight } from '../hooks/useGist'
-import type { GistContent, VideoMeta, QuizQuestion } from '../lib/gist-pipeline'
-import { generateQuiz } from '../lib/gist-pipeline'
+import type { GistContent, VideoMeta, QuizQuestion, ChatMessage } from '../lib/gist-pipeline'
+import { generateQuiz, askVideo } from '../lib/gist-pipeline'
 import { buildMarkdownNotes, downloadGistPdf } from '../lib/export'
 import { watchUrl } from '../lib/youtube'
 
-type Tab = 'read' | 'notes' | 'quiz'
+type Tab = 'read' | 'notes' | 'ask' | 'quiz'
 
 export function Reader({
   recordId,
@@ -59,6 +63,14 @@ export function Reader({
   const [quizBusy, setQuizBusy] = useState(false)
   const [quizError, setQuizError] = useState<string | null>(null)
 
+  // Ask this video (chat)
+  const [chat, setChat] = useState<ChatMessage[]>(Array.isArray(data.chat) ? data.chat : [])
+  const [chatBusy, setChatBusy] = useState(false)
+  const [chatError, setChatError] = useState<string | null>(null)
+
+  // Tags
+  const [tags, setTags] = useState<string[]>(Array.isArray(data.tags) ? data.tags : [])
+
   // Reset per-gist view state.
   useEffect(() => {
     setTab('read')
@@ -67,8 +79,19 @@ export function Reader({
     setHighlights(Array.isArray(data.highlights) ? data.highlights : [])
     setQuiz(Array.isArray(data.quiz) ? (data.quiz as QuizQuestion[]) : null)
     setQuizError(null)
+    setChat(Array.isArray(data.chat) ? data.chat : [])
+    setChatError(null)
+    setTags(Array.isArray(data.tags) ? data.tags : [])
     scrollRef.current?.scrollTo({ top: 0 })
   }, [recordId])
+
+  // Mark the gist read when its owner opens it (drives the unread dot).
+  const readMarked = useRef<string | null>(null)
+  useEffect(() => {
+    if (!canEdit || readMarked.current === recordId) return
+    readMarked.current = recordId
+    put(recordId, { lastReadAt: new Date().toISOString() }).catch(() => {})
+  }, [recordId, canEdit, put])
 
   const meta: VideoMeta = {
     videoId: data.videoId,
@@ -217,6 +240,36 @@ export function Reader({
     }
   }
 
+  async function onAsk(question: string) {
+    const next = [...chat, { role: 'user', content: question } as ChatMessage]
+    setChat(next)
+    setChatBusy(true)
+    setChatError(null)
+    try {
+      const answer = await askVideo(meta.title, data.transcriptText || '', chat, question)
+      const finalMsgs = [...next, { role: 'assistant', content: answer } as ChatMessage]
+      setChat(finalMsgs)
+      put(recordId, { chat: finalMsgs }).catch(() => {})
+    } catch (e) {
+      setChatError(e instanceof Error ? e.message : 'Couldn’t get an answer.')
+    } finally {
+      setChatBusy(false)
+    }
+  }
+
+  function addTag(raw: string) {
+    const t = raw.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 24)
+    if (!t || tags.includes(t)) return
+    const next = [...tags, t]
+    setTags(next)
+    put(recordId, { tags: next }).catch(() => {})
+  }
+  function removeTag(t: string) {
+    const next = tags.filter((x) => x !== t)
+    setTags(next)
+    put(recordId, { tags: next }).catch(() => {})
+  }
+
   return (
     <div ref={scrollRef} className="h-full overflow-y-auto">
       <article className="mx-auto w-full max-w-[44rem] px-5 pb-28 pt-10 sm:px-8 lg:pt-14">
@@ -248,6 +301,7 @@ export function Reader({
               </Action>
             </div>
           </div>
+          <TagBar tags={tags} canEdit={canEdit} onAdd={addTag} onRemove={removeTag} />
         </header>
 
         {/* Video — docks to a floating mini-player on scroll */}
@@ -256,7 +310,7 @@ export function Reader({
         </div>
 
         {/* Tabs */}
-        <div className="mt-8 flex items-center gap-1 border-b border-border">
+        <div className="mt-8 flex items-center gap-1 overflow-x-auto border-b border-border">
           <SegTab active={tab === 'read'} onClick={() => setTab('read')}>
             Read
           </SegTab>
@@ -267,6 +321,9 @@ export function Reader({
                 {highlights.length}
               </span>
             )}
+          </SegTab>
+          <SegTab active={tab === 'ask'} onClick={() => setTab('ask')}>
+            Ask
           </SegTab>
           <SegTab active={tab === 'quiz'} onClick={() => setTab('quiz')}>
             Test yourself
@@ -294,6 +351,16 @@ export function Reader({
             onJump={jumpToMark}
             onUpdateNote={updateNote}
             onRemove={removeHighlight}
+          />
+        )}
+
+        {tab === 'ask' && (
+          <AskVideo
+            messages={chat}
+            busy={chatBusy}
+            error={chatError}
+            canEdit={canEdit}
+            onSend={onAsk}
           />
         )}
 
@@ -697,6 +764,77 @@ function StickyVideo({
 /* ------------------------------------------------------------------ */
 /* Bits                                                                */
 /* ------------------------------------------------------------------ */
+
+function TagBar({
+  tags,
+  canEdit,
+  onAdd,
+  onRemove,
+}: {
+  tags: string[]
+  canEdit: boolean
+  onAdd: (t: string) => void
+  onRemove: (t: string) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [val, setVal] = useState('')
+  if (tags.length === 0 && !canEdit) return null
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      {tags.map((t) => (
+        <span
+          key={t}
+          className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-[12px] font-medium text-foreground"
+        >
+          <TagIcon className="h-3 w-3 text-muted-foreground" />
+          {t}
+          {canEdit && (
+            <button
+              onClick={() => onRemove(t)}
+              className="ml-0.5 text-muted-foreground hover:text-destructive"
+              aria-label={`Remove tag ${t}`}
+            >
+              <XIcon className="h-3 w-3" />
+            </button>
+          )}
+        </span>
+      ))}
+      {canEdit &&
+        (adding ? (
+          <input
+            autoFocus
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                onAdd(val)
+                setVal('')
+                setAdding(false)
+              } else if (e.key === 'Escape') {
+                setVal('')
+                setAdding(false)
+              }
+            }}
+            onBlur={() => {
+              if (val.trim()) onAdd(val)
+              setVal('')
+              setAdding(false)
+            }}
+            placeholder="tag…"
+            className="w-24 rounded-full border border-border bg-background px-2.5 py-1 text-[12px] outline-none focus:border-primary/50"
+          />
+        ) : (
+          <button
+            onClick={() => setAdding(true)}
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+          >
+            <Plus className="h-3 w-3" />
+            Tag
+          </button>
+        ))}
+    </div>
+  )
+}
 
 function Eyebrow({ children }: { children: ReactNode }) {
   return (

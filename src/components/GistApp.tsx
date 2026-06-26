@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   useQuery,
@@ -19,11 +19,15 @@ import {
   LogOut,
   Sparkles,
   BookText,
+  Search,
+  Star,
+  Flame,
 } from 'lucide-react'
 import { cn } from './ui/utils'
 import { ConfirmModal } from './ui'
 import { Reader } from './Reader'
 import { useGist, type VideoRecord } from '../hooks/useGist'
+import { useStats } from '../hooks/useStats'
 import { parseVideoId, thumbnailFor } from '../lib/youtube'
 
 export function GistApp({ selectedId }: { selectedId?: string }) {
@@ -33,16 +37,40 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
   const [showAuth, setShowAuth] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<'all' | 'saved' | string>('all') // 'all' | 'saved' | 'tag:<t>'
   const { isSignedIn, user } = useAuthProfileReady({ requireUser: true })
+  const { stats } = useStats(user?.id)
 
   const { records, status } = useQuery<VideoRecord>('videos', {
     orderBy: 'createdAt',
     orderDir: 'desc',
   })
-  const { remove } = useMutations<VideoRecord>('videos')
+  const { remove, put } = useMutations<VideoRecord>('videos')
   const mine = user?.id ? records.filter((r) => r.createdBy === user.id) : []
   const selected = selectedId ? records.find((r) => r.recordId === selectedId) : undefined
   const canEdit = !!user?.id && selected?.createdBy === user.id
+
+  const allTags = Array.from(
+    new Set(mine.flatMap((r) => (Array.isArray(r.data.tags) ? r.data.tags : []))),
+  ).sort()
+
+  const q = search.trim().toLowerCase()
+  const visible = mine.filter((r) => {
+    const v = r.data
+    if (filter === 'saved' && !v.savedAt) return false
+    if (filter.startsWith('tag:') && !(v.tags || []).includes(filter.slice(4))) return false
+    if (q) {
+      const hay = [v.title, v.channel, v.tldr, (v.tags || []).join(' '), v.transcriptText]
+        .join(' ')
+        .toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
+
+  const toggleSave = (r: { recordId: string; data: VideoRecord }) =>
+    put(r.recordId, { savedAt: r.data.savedAt ? '' : new Date().toISOString() }).catch(() => {})
 
   async function confirmDelete() {
     if (!pendingDelete) return
@@ -126,11 +154,51 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
           </button>
         </div>
 
+        {/* Search */}
+        {mine.length > 0 && (
+          <div className="px-4 pb-2">
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-2.5">
+              <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search your gists…"
+                className="h-8 w-full bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} aria-label="Clear search">
+                  <X className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Filters */}
+        {mine.length > 0 && (allTags.length > 0 || mine.some((r) => r.data.savedAt)) && (
+          <div className="flex flex-wrap gap-1.5 px-4 pb-2.5">
+            <FilterChip active={filter === 'all'} onClick={() => setFilter('all')}>
+              All
+            </FilterChip>
+            {mine.some((r) => r.data.savedAt) && (
+              <FilterChip active={filter === 'saved'} onClick={() => setFilter('saved')}>
+                <Star className="h-3 w-3" /> Saved
+              </FilterChip>
+            )}
+            {allTags.map((t) => (
+              <FilterChip
+                key={t}
+                active={filter === `tag:${t}`}
+                onClick={() => setFilter(filter === `tag:${t}` ? 'all' : `tag:${t}`)}
+              >
+                {t}
+              </FilterChip>
+            ))}
+          </div>
+        )}
+
         {/* Reading list */}
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-          <p className="px-2 pb-1.5 pt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            Reading list
-          </p>
           {status === 'loading' ? (
             <p className="px-2 py-3 text-sm text-muted-foreground">Loading…</p>
           ) : mine.length === 0 ? (
@@ -139,14 +207,19 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
                 ? 'Nothing yet. Paste a YouTube link to make your first gist.'
                 : 'Sign in to save the videos you read.'}
             </p>
+          ) : visible.length === 0 ? (
+            <p className="px-2 py-3 text-[13px] text-muted-foreground">No gists match.</p>
           ) : (
             <ul className="space-y-0.5">
-              {mine.map((r) => (
+              {visible.map((r) => (
                 <ListItem
                   key={r.recordId}
                   record={r}
                   active={r.recordId === selectedId}
+                  saved={!!r.data.savedAt}
+                  unread={!r.data.lastReadAt}
                   onOpen={() => navigate(`/v/${r.recordId}`)}
+                  onToggleSave={() => toggleSave(r)}
                   onDelete={() => setPendingDelete({ id: r.recordId, title: r.data.title })}
                 />
               ))}
@@ -160,6 +233,7 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
           name={user?.name}
           email={user?.email}
           imageUrl={user?.imageUrl}
+          streak={stats?.streak ?? 0}
           onSignIn={() => setShowAuth(true)}
         />
       </aside>
@@ -350,12 +424,18 @@ function Compose({
 function ListItem({
   record,
   active,
+  saved,
+  unread,
   onOpen,
+  onToggleSave,
   onDelete,
 }: {
   record: { recordId: string; data: VideoRecord; createdBy: string }
   active: boolean
+  saved: boolean
+  unread: boolean
   onOpen: () => void
+  onToggleSave: () => void
   onDelete: () => void
 }) {
   const v = record.data
@@ -379,29 +459,77 @@ function ListItem({
         <div className="min-w-0 flex-1">
           <p
             className={cn(
-              'line-clamp-2 text-[13px] font-medium leading-snug',
-              active ? 'text-foreground' : 'text-foreground/90',
+              'line-clamp-2 text-[13px] leading-snug',
+              active ? 'font-semibold text-foreground' : 'font-medium text-foreground/90',
             )}
           >
+            {unread && (
+              <span
+                aria-label="Unread"
+                className="mr-1.5 inline-block h-1.5 w-1.5 -translate-y-px rounded-full bg-primary align-middle"
+              />
+            )}
             {v.title}
           </p>
           {v.channel && (
             <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{v.channel}</p>
           )}
         </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            void onDelete()
-          }}
-          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-colors hover:bg-background hover:text-destructive group-hover:opacity-100"
-          aria-label="Delete"
-          title="Delete"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex shrink-0 flex-col items-center gap-0.5">
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleSave()
+            }}
+            className={cn(
+              'rounded p-1 transition-colors hover:bg-background',
+              saved
+                ? 'text-primary'
+                : 'text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100',
+            )}
+            aria-label={saved ? 'Unsave' : 'Save'}
+            title={saved ? 'Saved' : 'Save'}
+          >
+            <Star className={cn('h-3.5 w-3.5', saved && 'fill-current')} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              void onDelete()
+            }}
+            className="rounded p-1 text-muted-foreground opacity-0 transition-colors hover:bg-background hover:text-destructive group-hover:opacity-100"
+            aria-label="Delete"
+            title="Delete"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
     </li>
+  )
+}
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors',
+        active
+          ? 'bg-primary text-primary-foreground'
+          : 'bg-secondary text-muted-foreground hover:text-foreground',
+      )}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -410,18 +538,27 @@ function Account({
   name,
   email,
   imageUrl,
+  streak,
   onSignIn,
 }: {
   isSignedIn: boolean
   name?: string
   email?: string
   imageUrl?: string
+  streak: number
   onSignIn: () => void
 }) {
   return (
     <div className="border-t border-border p-3">
       {isSignedIn ? (
-        <div className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
+        <>
+          {streak > 0 && (
+            <div className="mb-1.5 flex items-center gap-1.5 px-2 text-[12px] font-medium text-foreground">
+              <Flame className="h-3.5 w-3.5 text-primary" />
+              {streak}-day reading streak
+            </div>
+          )}
+          <div className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-[11px] font-semibold text-muted-foreground ring-1 ring-border">
             {imageUrl ? (
               <img src={imageUrl} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
@@ -441,7 +578,8 @@ function Account({
           >
             <LogOut className="h-4 w-4" />
           </button>
-        </div>
+          </div>
+        </>
       ) : (
         <button
           onClick={onSignIn}

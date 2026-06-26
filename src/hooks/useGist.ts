@@ -9,6 +9,7 @@ import {
   type VideoMeta,
   type GistContent,
   type QuizQuestion,
+  type ChatMessage,
 } from '../lib/gist-pipeline'
 
 export type GistStage =
@@ -35,6 +36,14 @@ export interface VideoRecord extends VideoMeta, GistContent {
   quiz?: QuizQuestion[]
   /** Reader's highlights + margin notes. */
   highlights?: Highlight[]
+  /** User-defined tags for organizing the rail. */
+  tags?: string[]
+  /** "Ask this video" conversation, persisted for the owner. */
+  chat?: ChatMessage[]
+  /** ISO timestamp when starred, or empty/undefined when not saved. */
+  savedAt?: string
+  /** ISO timestamp the owner last opened this gist. */
+  lastReadAt?: string
 }
 
 const STAGE_LABEL: Record<GistStage, string> = {

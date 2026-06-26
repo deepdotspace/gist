@@ -51,6 +51,11 @@ export interface QuizQuestion {
   explanation?: string
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export class PipelineError extends Error {}
 
 // Roughly bound token cost / latency. ~48k chars ≈ 12k tokens of transcript.
@@ -332,6 +337,44 @@ export async function generateQuiz(
   return questions
     .map(normalizeQuestion)
     .filter((q): q is QuizQuestion => q !== null)
+}
+
+// ---------------------------------------------------------------------------
+// Ask this video (Claude, grounded in the transcript) — no streaming infra
+// needed; one chat-completion call per question with the transcript as context.
+// ---------------------------------------------------------------------------
+
+const ASK_SYSTEM = (title: string, transcript: string) =>
+  `You are answering questions about ONE YouTube video, using only its transcript below. Rules:
+- Answer strictly from the transcript. If it isn't covered, say so briefly — don't make things up.
+- Be concise and conversational (a few sentences). Use plain text, no markdown headers.
+- When it helps, cite the moment with a timestamp copied from the transcript, like [2:40].
+
+Video title: ${title}
+Transcript (each line is "[m:ss] ..."):
+${transcript}`
+
+export async function askVideo(
+  title: string,
+  transcript: string,
+  history: ChatMessage[],
+  question: string,
+): Promise<string> {
+  const messages = [
+    ...history.map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user' as const, content: question },
+  ]
+  const data = asRecord(
+    await callIntegration('anthropic/chat-completion', {
+      model: SUMMARY_MODEL,
+      max_tokens: 1024,
+      system: ASK_SYSTEM(title, transcript),
+      messages,
+    }),
+  )
+  const answer = extractText(data).trim()
+  if (!answer) throw new PipelineError('No answer came back. Please try again.')
+  return answer
 }
 
 // ---------------------------------------------------------------------------
