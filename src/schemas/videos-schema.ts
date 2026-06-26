@@ -25,6 +25,7 @@ export const videosSchema: CollectionSchema = {
     { name: 'steps', storage: 'text', interpretation: { kind: 'json' } },
     { name: 'transcriptText', storage: 'text', interpretation: 'plain' },
     { name: 'quiz', storage: 'text', interpretation: { kind: 'json' } },
+    { name: 'highlights', storage: 'text', interpretation: { kind: 'json' } },
   ],
   permissions: {
     // Public read so a results link is shareable; only signed-in members

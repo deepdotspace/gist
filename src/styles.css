@@ -119,6 +119,24 @@
   letter-spacing: 0.001em;
 }
 
+/* Reader highlights. */
+.gist-highlight {
+  background-color: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  border-radius: 0.2em;
+  padding: 0.05em 0.05em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+  color: inherit;
+  transition: background-color 0.15s;
+}
+.gist-highlight:hover {
+  background-color: color-mix(in srgb, var(--color-primary) 34%, transparent);
+}
+.gist-highlight[data-has-note='true'] {
+  border-bottom: 2px solid color-mix(in srgb, var(--color-primary) 60%, transparent);
+}
+
 /* Editorial drop-cap on the first paragraph of the long read. */
 .dropcap::first-letter {
   float: left;

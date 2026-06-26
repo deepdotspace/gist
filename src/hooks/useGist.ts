@@ -20,11 +20,21 @@ export type GistStage =
   | 'done'
   | 'error'
 
+/** A reader-created highlight, optionally annotated with a note. */
+export interface Highlight {
+  id: string
+  text: string
+  note?: string
+  createdAt: number
+}
+
 export interface VideoRecord extends VideoMeta, GistContent {
   videoId: string
   transcriptText: string
   /** Cached quiz, generated lazily on the results page. */
   quiz?: QuizQuestion[]
+  /** Reader's highlights + margin notes. */
+  highlights?: Highlight[]
 }
 
 const STAGE_LABEL: Record<GistStage, string> = {

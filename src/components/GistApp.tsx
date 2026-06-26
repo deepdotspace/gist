@@ -21,6 +21,7 @@ import {
   BookText,
 } from 'lucide-react'
 import { cn } from './ui/utils'
+import { ConfirmModal } from './ui'
 import { Reader } from './Reader'
 import { useGist, type VideoRecord } from '../hooks/useGist'
 import { parseVideoId, thumbnailFor } from '../lib/youtube'
@@ -30,6 +31,8 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
   const gist = useGist()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [showAuth, setShowAuth] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const { isSignedIn, user } = useAuthProfileReady({ requireUser: true })
 
   const { records, status } = useQuery<VideoRecord>('videos', {
@@ -39,6 +42,19 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
   const { remove } = useMutations<VideoRecord>('videos')
   const mine = user?.id ? records.filter((r) => r.createdBy === user.id) : []
   const selected = selectedId ? records.find((r) => r.recordId === selectedId) : undefined
+  const canEdit = !!user?.id && selected?.createdBy === user.id
+
+  async function confirmDelete() {
+    if (!pendingDelete) return
+    setDeleting(true)
+    try {
+      await remove(pendingDelete.id)
+      if (pendingDelete.id === selectedId) navigate('/home')
+    } finally {
+      setDeleting(false)
+      setPendingDelete(null)
+    }
+  }
 
   // Navigate to the freshly created gist when the pipeline finishes.
   useEffect(() => {
@@ -131,10 +147,7 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
                   record={r}
                   active={r.recordId === selectedId}
                   onOpen={() => navigate(`/v/${r.recordId}`)}
-                  onDelete={async () => {
-                    await remove(r.recordId)
-                    if (r.recordId === selectedId) navigate('/home')
-                  }}
+                  onDelete={() => setPendingDelete({ id: r.recordId, title: r.data.title })}
                 />
               ))}
             </ul>
@@ -168,7 +181,7 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
               <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading…
             </Centered>
           ) : selected ? (
-            <Reader recordId={selected.recordId} data={selected.data} />
+            <Reader recordId={selected.recordId} data={selected.data} canEdit={canEdit} />
           ) : (
             <Centered>
               <div className="text-center">
@@ -189,19 +202,29 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
         )}
       </main>
 
-      {showAuth && (
-        <AuthOverlay
-          onClose={() => {
-            setShowAuth(false)
-            if (!selectedId && gist.stage !== 'done') {
-              // If they came back signed-in with a pending URL, the Compose
-              // input keeps its value; nothing else to do.
-            }
-          }}
-        />
-      )}
+      {showAuth && <AuthOverlay onClose={() => setShowAuth(false)} />}
+
+      <ConfirmModal
+        open={!!pendingDelete}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
+        title="Delete this gist?"
+        description={
+          pendingDelete
+            ? `“${truncate(pendingDelete.title, 80)}” and its highlights & notes will be permanently removed.`
+            : ''
+        }
+        confirmText="Delete"
+        cancelText="Keep"
+        variant="destructive"
+        loading={deleting}
+      />
     </div>
   )
+}
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s
 }
 
 /* ------------------------------------------------------------------ */
