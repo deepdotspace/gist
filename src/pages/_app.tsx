@@ -6,11 +6,11 @@
  */
 
 import { Suspense, type ReactNode } from 'react'
-import { Outlet, useRouteError } from 'react-router-dom'
+import { Outlet, useRouteError, useLocation, useMatch } from 'react-router-dom'
 import { DeepSpaceAuthProvider, useAuthStatus } from 'deepspace'
 import { RecordProvider, RecordScope } from 'deepspace'
 import { ErrorScreen, ToastProvider } from '../components/ui'
-import Navigation from '../components/Navigation'
+import { GistApp } from '../components/GistApp'
 import { APP_NAME, SCOPE_ID } from '../constants'
 import { schemas } from '../schemas'
 
@@ -20,19 +20,41 @@ export default function App() {
       <DeepSpaceAuthProvider>
         <AuthBoot>
           {/* data-testid="app-root" is the canonical "app shell mounted" hook
-              every test relies on. Don't rename without updating templates/tests. */}
-          <div data-testid="app-root" className="flex h-screen flex-col bg-background overflow-hidden">
-            <Navigation />
-            <main className="flex-1 overflow-y-auto min-h-0">
-              <Suspense fallback={<div className="flex items-center justify-center h-full text-muted-foreground">Loading...</div>}>
-                <Outlet />
-              </Suspense>
-            </main>
+              every test relies on. Don't rename without updating templates/tests.
+              No global chrome — the app IS the GistApp workspace shell. */}
+          <div data-testid="app-root" className="h-screen overflow-hidden bg-background text-foreground">
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-muted-foreground">
+                  Loading…
+                </div>
+              }
+            >
+              <Shell />
+            </Suspense>
           </div>
         </AuthBoot>
       </DeepSpaceAuthProvider>
     </ToastProvider>
   )
+}
+
+/**
+ * The main experience (`/home`, `/v/:id`) is ONE persistent workspace — the
+ * GistApp shell stays mounted while you move between gists, so the sidebar and
+ * its scroll/state never flash. We render it directly here (not via Outlet) so
+ * React keeps the same instance across those navigations. Any other route
+ * (settings, 404) falls through to the normal Outlet.
+ */
+function Shell() {
+  const { pathname } = useLocation()
+  const videoMatch = useMatch('/v/:id')
+  const isWorkspace = pathname === '/home' || pathname.startsWith('/v/')
+
+  if (isWorkspace) {
+    return <GistApp selectedId={videoMatch?.params.id} />
+  }
+  return <Outlet />
 }
 
 /**
