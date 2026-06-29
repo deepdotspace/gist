@@ -14,6 +14,7 @@ import {
   Tag as TagIcon,
   Plus,
   X as XIcon,
+  StickyNote,
 } from 'lucide-react'
 import { useToast } from './ui'
 import { cn } from './ui/utils'
@@ -54,7 +55,14 @@ export function Reader({
   const [highlights, setHighlights] = useState<Highlight[]>(
     Array.isArray(data.highlights) ? data.highlights : [],
   )
-  const [sel, setSel] = useState<{ text: string; top: number; left: number } | null>(null)
+  // Selection bubble (phase 1) — anchored at the live text selection.
+  const [sel, setSel] = useState<{ text: string; top: number; bottom: number; left: number } | null>(
+    null,
+  )
+  // Inline note editor (phase 2) — a sticky popover for one highlight's note.
+  const [noteEditor, setNoteEditor] = useState<{ id: string; x: number; y: number } | null>(null)
+  // Custom hover tooltip showing a truncated note preview.
+  const [hoverNote, setHoverNote] = useState<{ note: string; x: number; y: number } | null>(null)
 
   // Quiz
   const [quiz, setQuiz] = useState<QuizQuestion[] | null>(
@@ -75,6 +83,8 @@ export function Reader({
   useEffect(() => {
     setTab('read')
     setSel(null)
+    setNoteEditor(null)
+    setHoverNote(null)
     setFocusHl(null)
     setHighlights(Array.isArray(data.highlights) ? data.highlights : [])
     setQuiz(Array.isArray(data.quiz) ? (data.quiz as QuizQuestion[]) : null)
@@ -119,6 +129,11 @@ export function Reader({
     if (tab !== 'read') setTab('read')
   }
 
+  // Always-latest highlights so mutators called from a closing popover (which
+  // captured an older render) don't write a stale array back.
+  const highlightsRef = useRef(highlights)
+  highlightsRef.current = highlights
+
   const persist = useCallback(
     (next: Highlight[]) => {
       setHighlights(next)
@@ -129,25 +144,35 @@ export function Reader({
     [put, recordId, toast],
   )
 
-  const addHighlight = (text: string) => {
+  /** Create (or find a duplicate) highlight; returns its id, or null if too short. */
+  const addHighlight = (text: string): string | null => {
     const clean = text.replace(/\s+/g, ' ').trim()
-    if (clean.length < 3) return
-    if (highlights.some((h) => h.text === clean)) {
-      setSel(null)
-      return
-    }
+    if (clean.length < 3) return null
+    const existing = highlightsRef.current.find((h) => h.text === clean)
+    setSel(null)
+    window.getSelection()?.removeAllRanges()
+    if (existing) return existing.id
     const hl: Highlight = {
       id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
       text: clean,
       createdAt: Date.now(),
     }
-    persist([...highlights, hl])
-    setSel(null)
-    window.getSelection()?.removeAllRanges()
+    persist([...highlightsRef.current, hl])
+    return hl.id
   }
   const updateNote = (id: string, note: string) =>
-    persist(highlights.map((h) => (h.id === id ? { ...h, note } : h)))
-  const removeHighlight = (id: string) => persist(highlights.filter((h) => h.id !== id))
+    persist(highlightsRef.current.map((h) => (h.id === id ? { ...h, note: note || undefined } : h)))
+  const removeHighlight = (id: string) =>
+    persist(highlightsRef.current.filter((h) => h.id !== id))
+
+  // "Highlight" — just mark it. "+ Note" — mark it, then open the inline editor.
+  const highlightOnly = () => sel && addHighlight(sel.text)
+  const highlightWithNote = () => {
+    if (!sel) return
+    const { bottom, left } = sel
+    const id = addHighlight(sel.text)
+    if (id) setNoteEditor({ id, x: left, y: bottom })
+  }
 
   // Detect a text selection inside the prose to offer a "Highlight" button.
   function onProseMouseUp() {
@@ -159,7 +184,7 @@ export function Reader({
     const range = selection.getRangeAt(0)
     if (!proseRef.current?.contains(range.commonAncestorContainer)) return setSel(null)
     const rect = range.getBoundingClientRect()
-    setSel({ text, top: rect.top, left: rect.left + rect.width / 2 })
+    setSel({ text, top: rect.top, bottom: rect.bottom, left: rect.left + rect.width / 2 })
   }
 
   // Hide the selection toolbar on scroll / when the selection collapses.
@@ -179,11 +204,49 @@ export function Reader({
     }
   }, [sel])
 
-  // Clicking a highlight jumps to the Notes tab and focuses that note.
-  const onClickMark = (id: string) => {
-    setTab('notes')
-    setFocusHl(id)
+  // Clicking a highlight opens the inline note editor right at the mark.
+  const onClickMark = (id: string, rect: DOMRect) => {
+    setHoverNote(null)
+    setNoteEditor({ id, x: rect.left + rect.width / 2, y: rect.bottom })
   }
+
+  // Custom hover tooltip (truncated note preview) via event delegation on the prose.
+  useEffect(() => {
+    const root = proseRef.current
+    if (tab !== 'read' || !root) return
+    const onOver = (e: Event) => {
+      const m = (e.target as HTMLElement).closest?.('mark[data-hl-id]')
+      if (!m) return
+      const h = highlights.find((x) => x.id === m.getAttribute('data-hl-id'))
+      if (!h?.note) return setHoverNote(null)
+      const r = m.getBoundingClientRect()
+      setHoverNote({ note: h.note, x: r.left + r.width / 2, y: r.top })
+    }
+    const onOut = (e: Event) => {
+      if ((e.target as HTMLElement).closest?.('mark[data-hl-id]')) setHoverNote(null)
+    }
+    root.addEventListener('mouseover', onOver)
+    root.addEventListener('mouseout', onOut)
+    return () => {
+      root.removeEventListener('mouseover', onOver)
+      root.removeEventListener('mouseout', onOut)
+    }
+  }, [tab, highlights])
+
+  // Close the inline note editor on outside-click / Escape.
+  useEffect(() => {
+    if (!noteEditor) return
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-note-editor]')) setNoteEditor(null)
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setNoteEditor(null)
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [noteEditor])
   // Jump from Notes back to the marked text in the article.
   const jumpToMark = (id: string) => {
     setTab('read')
@@ -371,17 +434,58 @@ export function Reader({
         )}
       </article>
 
-      {/* Selection toolbar */}
-      {sel && (
-        <button
+      {/* Selection bubble — highlight, or highlight + add a note inline */}
+      {sel && !noteEditor && (
+        <div
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => addHighlight(sel.text)}
-          style={{ position: 'fixed', top: sel.top - 44, left: sel.left, transform: 'translateX(-50%)' }}
-          className="z-50 inline-flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-[13px] font-medium text-background shadow-lg transition-transform hover:scale-[1.03]"
+          style={{ position: 'fixed', top: sel.top - 46, left: sel.left, transform: 'translateX(-50%)' }}
+          className="z-50 flex items-center overflow-hidden rounded-lg bg-foreground text-[13px] font-medium text-background shadow-lg"
         >
-          <Highlighter className="h-3.5 w-3.5" />
-          Highlight
-        </button>
+          <button
+            onClick={highlightOnly}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 transition-colors hover:bg-background/15"
+          >
+            <Highlighter className="h-3.5 w-3.5" />
+            Highlight
+          </button>
+          <span aria-hidden className="h-5 w-px bg-background/25" />
+          <button
+            onClick={highlightWithNote}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 transition-colors hover:bg-background/15"
+          >
+            <StickyNote className="h-3.5 w-3.5" />
+            Note
+          </button>
+        </div>
+      )}
+
+      {/* Inline note editor — anchored at the highlight */}
+      {noteEditor &&
+        (() => {
+          const h = highlights.find((x) => x.id === noteEditor.id)
+          if (!h) return null
+          return (
+            <InlineNoteEditor
+              key={noteEditor.id}
+              highlight={h}
+              canEdit={canEdit}
+              x={noteEditor.x}
+              y={noteEditor.y}
+              onCommit={(note) => updateNote(h.id, note)}
+              onDelete={() => removeHighlight(h.id)}
+              onClose={() => setNoteEditor(null)}
+            />
+          )
+        })()}
+
+      {/* Hover tooltip — truncated note preview */}
+      {hoverNote && !noteEditor && (
+        <div
+          style={{ position: 'fixed', top: hoverNote.y - 8, left: hoverNote.x, transform: 'translate(-50%, -100%)' }}
+          className="pointer-events-none z-50 max-w-[18rem] rounded-lg bg-foreground px-3 py-2 text-[12px] leading-snug text-background shadow-lg"
+        >
+          {truncate(hoverNote.note, 100)}
+        </div>
       )}
 
       {showAuth && <AuthOverlay onClose={() => setShowAuth(false)} />}
@@ -402,7 +506,7 @@ function Notes({
   gist: GistContent
   highlights: Highlight[]
   onSeek: (s: number) => void
-  onClickMark: (id: string) => void
+  onClickMark: (id: string, rect: DOMRect) => void
 }) {
   const hl = (text: string) => renderHighlighted(text, highlights, onClickMark)
   return (
@@ -503,7 +607,7 @@ function Notes({
 function renderHighlighted(
   text: string,
   highlights: Highlight[],
-  onClickMark: (id: string) => void,
+  onClickMark: (id: string, rect: DOMRect) => void,
 ): ReactNode {
   if (!highlights.length) return text
   const ranges: { start: number; end: number; h: Highlight }[] = []
@@ -527,8 +631,7 @@ function renderHighlighted(
         data-hl-id={r.h.id}
         data-has-note={r.h.note ? 'true' : 'false'}
         className="gist-highlight"
-        onClick={() => onClickMark(r.h.id)}
-        title={r.h.note || 'View note'}
+        onClick={(e) => onClickMark(r.h.id, (e.currentTarget as HTMLElement).getBoundingClientRect())}
       >
         {text.slice(r.start, r.end)}
       </mark>,
@@ -677,6 +780,112 @@ function HighlightRow({
       )}
     </div>
   )
+}
+
+/* ------------------------------------------------------------------ */
+/* Inline note editor (popover anchored at a highlight)                */
+/* ------------------------------------------------------------------ */
+
+function InlineNoteEditor({
+  highlight,
+  canEdit,
+  x,
+  y,
+  onCommit,
+  onDelete,
+  onClose,
+}: {
+  highlight: Highlight
+  canEdit: boolean
+  x: number
+  y: number
+  onCommit: (note: string) => void
+  onDelete: () => void
+  onClose: () => void
+}) {
+  const [draft, setDraft] = useState(highlight.note ?? '')
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  const skipCommit = useRef(false)
+  const taRef = useRef<HTMLTextAreaElement>(null)
+  const original = highlight.note ?? ''
+
+  useEffect(() => {
+    const ta = taRef.current
+    if (!ta) return
+    ta.focus()
+    ta.setSelectionRange(ta.value.length, ta.value.length)
+  }, [])
+
+  // Commit the latest draft whenever the editor closes (outside-click, Escape,
+  // Save). Mount-only ([] deps): the commit must fire on unmount, not on every
+  // re-render; refs (draftRef/skipCommit) carry the latest values.
+  const commitRef = useRef<() => void>(() => {})
+  commitRef.current = () => {
+    if (skipCommit.current) return
+    const v = draftRef.current.trim()
+    if (v !== original) onCommit(v)
+  }
+  useEffect(() => () => commitRef.current(), [])
+
+  const left = Math.min(Math.max(x, 150), window.innerWidth - 150)
+  const top = Math.min(y + 8, window.innerHeight - 190)
+
+  return (
+    <div
+      data-note-editor
+      style={{ position: 'fixed', top, left, transform: 'translateX(-50%)' }}
+      className="z-50 w-72 rounded-xl border border-border bg-card p-3 shadow-xl"
+    >
+      <blockquote className="reading-serif mb-2 line-clamp-2 border-l-2 border-primary/40 pl-2 text-[13px] italic text-muted-foreground">
+        {highlight.text}
+      </blockquote>
+      {canEdit ? (
+        <>
+          <textarea
+            ref={taRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                onClose()
+              }
+            }}
+            placeholder="Add a note…"
+            rows={3}
+            className="w-full resize-none rounded-lg border border-border bg-background px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/50"
+          />
+          <div className="mt-2 flex items-center justify-between">
+            <button
+              onClick={() => {
+                skipCommit.current = true
+                onDelete()
+                onClose()
+              }}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:text-destructive"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-md bg-primary px-3 py-1 text-[12px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              Save
+            </button>
+          </div>
+        </>
+      ) : highlight.note ? (
+        <p className="text-sm text-foreground">{highlight.note}</p>
+      ) : (
+        <p className="text-sm text-muted-foreground">No note on this highlight.</p>
+      )}
+    </div>
+  )
+}
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n).trimEnd()}…` : s
 }
 
 /* ------------------------------------------------------------------ */
