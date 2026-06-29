@@ -282,6 +282,7 @@ app.all('/api/debug/*', async (c) => {
   return stub.fetch(c.req.raw)
 })
 
+
 // ---------------------------------------------------------------------------
 // Integrations proxy → api-worker
 // ---------------------------------------------------------------------------
@@ -765,6 +766,16 @@ app.get('/api/yt-oembed', async (c) => {
 // ---------------------------------------------------------------------------
 
 app.get('*', async (c) => {
+  // Wake the cron room so its alarm is scheduled (the DO inits lazily on first
+  // fetch; without a touch after deploy, the auto-gist digest never fires).
+  // Fire-and-forget and idempotent — a no-op once the alarm is set.
+  c.executionCtx.waitUntil(
+    c.env.CRON_ROOMS.get(c.env.CRON_ROOMS.idFromName(`app:${c.env.APP_NAME}`))
+      .fetch('https://internal/wake')
+      .then(() => undefined)
+      .catch(() => undefined),
+  )
+
   const response = await c.env.ASSETS.fetch(c.req.raw)
   if (response.status === 404) {
     const url = new URL(c.req.url)

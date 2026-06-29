@@ -12,6 +12,8 @@ export const statsSchema: CollectionSchema = {
     { name: 'streak', storage: 'number', interpretation: 'plain' },
     { name: 'longest', storage: 'number', interpretation: 'plain' },
     { name: 'totalRead', storage: 'number', interpretation: 'plain' },
+    { name: 'emailDigest', storage: 'number', interpretation: 'plain' }, // 1 = on (default), 0 = off
+    { name: 'lastDigestAt', storage: 'text', interpretation: 'plain' }, // ISO of last digest email
   ],
   permissions: {
     '*': { read: false, create: false, update: false, delete: false },

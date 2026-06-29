@@ -30,6 +30,8 @@ export const videosSchema: CollectionSchema = {
     { name: 'chat', storage: 'text', interpretation: { kind: 'json' } },
     { name: 'savedAt', storage: 'text', interpretation: 'plain' },
     { name: 'lastReadAt', storage: 'text', interpretation: 'plain' },
+    { name: 'source', storage: 'text', interpretation: 'plain' }, // 'manual' | 'auto'
+    { name: 'channelId', storage: 'text', interpretation: 'plain' },
   ],
   permissions: {
     // Public read so a results link is shareable; only signed-in members

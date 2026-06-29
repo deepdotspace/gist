@@ -22,15 +22,17 @@ import {
   Search,
   Star,
   Flame,
+  Rss,
 } from 'lucide-react'
 import { cn } from './ui/utils'
 import { ConfirmModal } from './ui'
 import { Reader } from './Reader'
+import { Following } from './Following'
 import { useGist, type VideoRecord } from '../hooks/useGist'
 import { useStats } from '../hooks/useStats'
 import { parseVideoId, thumbnailFor } from '../lib/youtube'
 
-export function GistApp({ selectedId }: { selectedId?: string }) {
+export function GistApp({ selectedId, view }: { selectedId?: string; view?: 'following' }) {
   const navigate = useNavigate()
   const gist = useGist()
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -40,7 +42,8 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'all' | 'saved' | string>('all') // 'all' | 'saved' | 'tag:<t>'
   const { isSignedIn, user } = useAuthProfileReady({ requireUser: true })
-  const { stats } = useStats(user?.id)
+  const { stats, setEmailDigest } = useStats(user?.id)
+  const digestOn = stats?.emailDigest == null ? true : Number(stats.emailDigest) === 1
 
   const { records, status } = useQuery<VideoRecord>('videos', {
     orderBy: 'createdAt',
@@ -93,7 +96,7 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
   useEffect(() => setDrawerOpen(false), [selectedId])
 
   function openCompose() {
-    if (selectedId) navigate('/home')
+    if (selectedId || view) navigate('/home')
     if (gist.stage === 'error') gist.reset()
     setDrawerOpen(false)
   }
@@ -144,13 +147,29 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
             onClick={openCompose}
             className={cn(
               'flex w-full items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors',
-              !selectedId
+              !selectedId && !view
                 ? 'border-primary/40 bg-primary/10 text-primary'
                 : 'border-border bg-background text-foreground hover:bg-secondary',
             )}
           >
             <Plus className="h-4 w-4" />
             New gist
+          </button>
+
+          <button
+            onClick={() => {
+              navigate('/following')
+              setDrawerOpen(false)
+            }}
+            className={cn(
+              'mt-2 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors',
+              view === 'following'
+                ? 'bg-secondary text-foreground'
+                : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+            )}
+          >
+            <Rss className="h-4 w-4" />
+            Following
           </button>
         </div>
 
@@ -249,7 +268,24 @@ export function GistApp({ selectedId }: { selectedId?: string }) {
           <PanelLeft className="h-4 w-4" />
         </button>
 
-        {selectedId ? (
+        {view === 'following' ? (
+          isSignedIn ? (
+            <Following userId={user?.id} digestOn={digestOn} onToggleDigest={setEmailDigest} />
+          ) : (
+            <Centered>
+              <div className="text-center">
+                <Rss className="mx-auto h-9 w-9 text-muted-foreground" />
+                <p className="reading-serif mt-3 text-xl font-semibold">Follow your channels</p>
+                <p className="mt-1 max-w-xs text-sm text-muted-foreground">
+                  Sign in to follow channels and get their uploads auto-gisted.
+                </p>
+                <button onClick={() => setShowAuth(true)} className="mt-3 text-sm font-medium text-primary hover:underline">
+                  Sign in
+                </button>
+              </div>
+            </Centered>
+          )
+        ) : selectedId ? (
           status === 'loading' ? (
             <Centered>
               <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading…

@@ -7,6 +7,7 @@ export type Path =
   | `*`
   | `/`
   | `/api-status`
+  | `/following`
   | `/home`
   | `/settings`
   | `/v/:id`

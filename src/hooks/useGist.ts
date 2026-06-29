@@ -1,25 +1,15 @@
-import { useCallback, useRef, useState } from 'react'
-import { useMutations } from 'deepspace'
+import { useCallback, useState } from 'react'
+import { useJobs } from 'deepspace'
+import { SCOPE_ID } from '../constants'
 import { parseVideoId } from '../lib/youtube'
-import {
-  fetchMetadata,
-  fetchTranscript,
-  summarize,
-  PipelineError,
-  type VideoMeta,
-  type GistContent,
-  type QuizQuestion,
-  type ChatMessage,
+import type {
+  VideoMeta,
+  GistContent,
+  QuizQuestion,
+  ChatMessage,
 } from '../lib/gist-pipeline'
 
-export type GistStage =
-  | 'idle'
-  | 'metadata'
-  | 'transcript'
-  | 'summarize'
-  | 'saving'
-  | 'done'
-  | 'error'
+export type GistStage = 'idle' | 'running' | 'done' | 'error'
 
 /** A reader-created highlight, optionally annotated with a note. */
 export interface Highlight {
@@ -44,124 +34,71 @@ export interface VideoRecord extends VideoMeta, GistContent {
   savedAt?: string
   /** ISO timestamp the owner last opened this gist. */
   lastReadAt?: string
+  /** 'manual' | 'auto' — how this gist was created. */
+  source?: string
+  /** Channel that produced it (set for auto-gisted videos). */
+  channelId?: string
 }
 
-const STAGE_LABEL: Record<GistStage, string> = {
-  idle: '',
-  metadata: 'Looking up the video…',
-  transcript: 'Pulling the transcript…',
-  summarize: 'Reading it so you don’t have to…',
-  saving: 'Saving your notes…',
-  done: 'Done',
-  error: '',
-}
-
-// Rough progress weighting so the bar moves sensibly between stages.
-const STAGE_PROGRESS: Record<GistStage, number> = {
-  idle: 0,
-  metadata: 0.12,
-  transcript: 0.4,
-  summarize: 0.8,
-  saving: 0.95,
-  done: 1,
-  error: 0,
-}
-
+/**
+ * Turns a YouTube URL into a gist by enqueuing a durable worker job
+ * (`gist-video`) and observing it via `useJobs`. The pipeline now runs in the
+ * worker, so closing the tab no longer kills it — the record still lands in
+ * the reading list when the job finishes.
+ */
 export function useGist() {
-  const { create } = useMutations<Record<string, unknown>>('videos')
-  const [stage, setStage] = useState<GistStage>('idle')
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [newId, setNewId] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
+  const { enqueue, jobs } = useJobs<{ url: string }>(SCOPE_ID)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [localError, setLocalError] = useState<string | null>(null)
 
-  const reset = useCallback(() => {
-    abortRef.current?.abort()
-    abortRef.current = null
-    setStage('idle')
-    setMessage('')
-    setError(null)
-    setNewId(null)
-  }, [])
+  const job = jobId ? jobs.find((j) => j.id === jobId) : undefined
+
+  const stage: GistStage = localError
+    ? 'error'
+    : !jobId
+      ? 'idle'
+      : job?.status === 'succeeded'
+        ? 'done'
+        : job?.status === 'failed' || job?.status === 'canceled'
+          ? 'error'
+          : 'running'
+
+  const result = job?.result as { recordId?: string } | undefined
+  const newId = stage === 'done' ? (result?.recordId ?? null) : null
+  const error =
+    localError ??
+    (job?.status === 'failed'
+      ? job.error || 'Something went wrong while reading this video.'
+      : null)
+  const progress =
+    stage === 'done' ? 1 : stage === 'running' ? Math.max(0.05, job?.progress ?? 0.05) : 0
+  const message = stage === 'running' ? job?.progressMessage || 'Working…' : ''
+  const busy = stage === 'running'
 
   const run = useCallback(
     async (input: string): Promise<string | null> => {
-      const videoId = parseVideoId(input)
-      if (!videoId) {
-        setStage('error')
-        setError('That doesn’t look like a YouTube link. Paste a full video URL.')
+      setLocalError(null)
+      setJobId(null)
+      if (!parseVideoId(input)) {
+        setLocalError('That doesn’t look like a YouTube link. Paste a full video URL.')
         return null
       }
-
-      const controller = new AbortController()
-      abortRef.current = controller
-      setError(null)
-      setNewId(null)
-
       try {
-        setStage('metadata')
-        setMessage(STAGE_LABEL.metadata)
-        const meta = await fetchMetadata(videoId)
-
-        setStage('transcript')
-        setMessage(STAGE_LABEL.transcript)
-        const transcript = await fetchTranscript(meta.url, {
-          signal: controller.signal,
-          onTick: (status) => {
-            if (status === 'RUNNING' || status === 'READY') {
-              setMessage('Pulling the transcript… (this can take a moment)')
-            }
-          },
-        })
-
-        setStage('summarize')
-        setMessage(STAGE_LABEL.summarize)
-        const gist = await summarize(meta, transcript.text)
-
-        setStage('saving')
-        setMessage(STAGE_LABEL.saving)
-        const record: VideoRecord = {
-          ...meta,
-          ...gist,
-          transcriptText: transcript.text,
-        }
-        const id = await create(record as unknown as Record<string, unknown>)
-
-        setNewId(id)
-        setStage('done')
-        setMessage(STAGE_LABEL.done)
+        const id = await enqueue('gist-video', { url: input })
+        setJobId(id)
         return id
-      } catch (err) {
-        if (controller.signal.aborted) {
-          setStage('idle')
-          return null
-        }
-        const msg =
-          err instanceof PipelineError
-            ? err.message
-            : err instanceof Error
-              ? err.message
-              : 'Something went wrong while reading this video.'
-        setStage('error')
-        setError(msg)
+      } catch {
+        setLocalError('Couldn’t start — give it a second and try again.')
         return null
-      } finally {
-        if (abortRef.current === controller) abortRef.current = null
       }
     },
-    [create],
+    [enqueue],
   )
 
-  const busy = stage !== 'idle' && stage !== 'error' && stage !== 'done'
+  const reset = useCallback(() => {
+    setJobId(null)
+    setLocalError(null)
+  }, [])
 
-  return {
-    stage,
-    message,
-    error,
-    newId,
-    busy,
-    progress: STAGE_PROGRESS[stage],
-    run,
-    reset,
-  }
+  return { stage, message, error, newId, busy, progress, run, reset }
 }

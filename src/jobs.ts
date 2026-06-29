@@ -1,50 +1,57 @@
 /**
- * Background-job handler — invoked by AppJobRoom (worker.ts) for every
- * job picked up from the queue. Dispatch on `job.type` and return a
- * result (captured as `job.result`) or throw to fail (retried up to
- * `maxAttempts`, then permanently marked failed).
+ * Background-job handlers (invoked by AppJobRoom in worker.ts).
  *
- * Use this for any work that needs to outlive the HTTP response:
- *   - AI generation that exceeds Cloudflare's 30-second waitUntil window
- *   - Export / render pipelines
- *   - Bulk imports, fan-out side effects
- *
- * Enqueue from a client with the `useJobs(roomId)` hook, or from
- * worker-side code (an HTTP route, an action, a cron task) with
- * `enqueueJob(env.JOB_ROOMS, \`app:${env.APP_NAME}\`, type, payload)`.
- *
- * Long-running progress / checkpoint guidance:
- *   - `ctx.progress(0..1, msg?)` publishes a real-time update over the
- *     room's WebSocket so subscribers see progress without polling.
- *   - `ctx.continue(state, { afterMs })` yields and resumes on the next
- *     alarm with `job.resumeFrom = state` — use this for work that
- *     exceeds the 15-minute per-alarm wall-time ceiling.
- *   - `ctx.signal` is an AbortSignal that fires when a client cancels;
- *     forward it to `fetch` and check `.aborted` at loop suspension
- *     points.
- *
- * Example:
- *
- *   export async function runJob(job: Job, ctx: JobContext, env: Env) {
- *     switch (job.type) {
- *       case 'ai-summarize': {
- *         const { text } = job.payload as { text: string }
- *         ctx.progress(0.1, 'starting')
- *         const summary = await summarize(text, { signal: ctx.signal })
- *         return { summary }
- *       }
- *       default:
- *         throw new Error(`Unknown job type: ${job.type}`)
- *     }
- *   }
+ * `gist-video` runs the full URL→gist pipeline durably in the worker, so it
+ * survives the user closing the tab and shares one code path with the
+ * auto-gist cron (src/cron.ts). The finished `videos` record is created as the
+ * user who enqueued the job (`job.enqueuedBy`), so it lands in their list;
+ * integrations are billed to the app owner via buildCronContext.
  */
 
-import type { Job, JobContext } from 'deepspace/worker'
+import { buildCronContext, type Job, type JobContext } from 'deepspace/worker'
+import { buildGist } from './lib/server-pipeline'
+import { parseVideoId } from './lib/youtube'
+
+// CronEnv isn't exported; the worker Env structurally satisfies buildCronContext.
+type GistJobEnv = { APP_NAME: string; OWNER_USER_ID?: string }
+type CronEnvArg = Parameters<typeof buildCronContext>[0]
 
 export async function runJob(
-  _job: Job,
-  _ctx: JobContext,
-  _env: unknown,
-): Promise<void> {
-  // No-op — implement your job handlers here. Dispatch on `_job.type`.
+  job: Job,
+  ctx: JobContext,
+  env: GistJobEnv,
+): Promise<unknown | void> {
+  if (job.type === 'gist-video') {
+    const { url, source, channelId } = (job.payload ?? {}) as {
+      url?: string
+      source?: string
+      channelId?: string
+    }
+    const videoId = url ? parseVideoId(url) : null
+    if (!videoId) throw new Error('That doesn’t look like a YouTube link.')
+
+    // Act as the enqueuing user for the record write; integrations bill the owner.
+    const actingUserId = job.enqueuedBy || env.OWNER_USER_ID || ''
+    const cx = buildCronContext(env as unknown as CronEnvArg, actingUserId, `app:${env.APP_NAME}`)
+
+    ctx.progress(0.05, 'Starting…')
+    const data = await buildGist(
+      (endpoint, body) => cx.integrations.call(endpoint, body as Record<string, unknown>),
+      videoId,
+      {
+        signal: ctx.signal,
+        onProgress: (p, msg) => ctx.progress(p, msg),
+        source: source ?? 'manual',
+        channelId,
+      },
+    )
+
+    const created = (await cx.records.create(
+      'videos',
+      data as unknown as Record<string, unknown>,
+    )) as { recordId: string }
+    return { recordId: created.recordId, title: data.title }
+  }
+
+  throw new Error(`Unknown job type: ${job.type}`)
 }

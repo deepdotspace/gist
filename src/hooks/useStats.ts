@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useQuery, useMutations } from 'deepspace'
 
 export interface Stats {
@@ -6,6 +6,9 @@ export interface Stats {
   streak: number
   longest: number
   totalRead: number
+  /** 1 = email digests on (default), 0 = off. */
+  emailDigest?: number
+  lastDigestAt?: string
 }
 
 function todayStr(): string {
@@ -61,5 +64,20 @@ export function useStats(userId: string | null | undefined) {
     bumped.current = false
   }, [userId])
 
-  return { stats }
+  const setEmailDigest = useCallback(
+    (on: boolean) => {
+      if (mine) void put(mine.recordId, { emailDigest: on ? 1 : 0 }).catch(() => {})
+      else
+        void create({
+          lastActiveDate: todayStr(),
+          streak: 1,
+          longest: 1,
+          totalRead: 1,
+          emailDigest: on ? 1 : 0,
+        }).catch(() => {})
+    },
+    [mine, put, create],
+  )
+
+  return { stats, setEmailDigest }
 }

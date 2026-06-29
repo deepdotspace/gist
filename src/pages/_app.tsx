@@ -49,10 +49,16 @@ export default function App() {
 function Shell() {
   const { pathname } = useLocation()
   const videoMatch = useMatch('/v/:id')
-  const isWorkspace = pathname === '/home' || pathname.startsWith('/v/')
+  const isFollowing = pathname === '/following'
+  const isWorkspace = pathname === '/home' || pathname.startsWith('/v/') || isFollowing
 
   if (isWorkspace) {
-    return <GistApp selectedId={videoMatch?.params.id} />
+    return (
+      <GistApp
+        selectedId={videoMatch?.params.id}
+        view={isFollowing ? 'following' : undefined}
+      />
+    )
   }
   return <Outlet />
 }
