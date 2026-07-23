@@ -42,9 +42,9 @@ export default function Navigation() {
         className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-xl"
       >
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:px-8">
-          {/* Brand — primary-tinted dot + name. Replace the dot with your logo. */}
+          {/* Brand — app logo + name. */}
           <Link to="/home" className="flex items-center gap-2 shrink-0">
-            <span className="h-2 w-2 rounded-full bg-primary" />
+            <img src="/favicon.svg" alt="" className="h-6 w-6 rounded-lg" />
             <span className="text-sm font-semibold tracking-tight text-foreground">
               {APP_NAME}
             </span>
