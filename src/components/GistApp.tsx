@@ -127,9 +127,8 @@ export function GistApp({ selectedId, view }: { selectedId?: string; view?: 'fol
               className="flex items-center gap-2"
               title="Gist"
             >
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                <BookText className="h-3.5 w-3.5" />
-              </span>
+              <img src="/favicon.svg?v=2" alt="" className="h-6 w-6 rounded-md" />
+
               <span className="reading-serif text-lg font-semibold tracking-tight text-foreground">
                 Gist
               </span>
